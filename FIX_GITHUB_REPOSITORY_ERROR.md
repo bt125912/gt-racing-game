@@ -58,7 +58,7 @@ git push -u origin main
 
 ### **After the repository exists:**
 
-1. **Go to your project board:** https://github.com/users/bt125912/projects/4
+1. **Go to your project board:** https://github.com/users/bt125912/projects/8
 2. **Click:** ⚙️ **Settings** (top right of the project board)
 3. **Click:** **"Manage access"** or **"Repository access"**
 4. **Click:** **"Add repository"**
@@ -76,7 +76,7 @@ After completing the setup:
 **https://github.com/bt125912/gt-racing-game**
 
 ### **Project Board:** 
-**https://github.com/users/bt125912/projects/4**
+**https://github.com/users/bt125912/projects/8**
 
 ### **Repository Sections:**
 - **Code:** https://github.com/bt125912/gt-racing-game
