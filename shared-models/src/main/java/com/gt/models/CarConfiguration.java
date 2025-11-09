@@ -133,6 +133,8 @@ public class CarConfiguration {
     }
 
     public void setTotalDistance(long totalDistance) {
+        this.totalDistance = totalDistance;
+    }
 
     public void setLocked(boolean locked) {
         isLocked = locked;
@@ -288,7 +290,7 @@ public class CarConfiguration {
 
         public float getRearDiscDiameter() { return rearDiscDiameter; }
         public void setRearDiscDiameter(float rearDiscDiameter) { this.rearDiscDiameter = rearDiscDiameter; }
-package com.gt.models;
+
         public boolean isAbsEnabled() { return absEnabled; }
         public void setAbsEnabled(boolean absEnabled) { this.absEnabled = absEnabled; }
     }
@@ -417,105 +419,8 @@ package com.gt.models;
 
         return (powerRating + handlingRating + speedRating + brakingRating) / 4.0f;
     }
-}
-    private String carId;
-    private String ownerId; // Player who owns/configured this car
-    private String baseName; // Base car name (e.g., "Nissan Skyline GT-R R34")
-    private String customName; // Player's custom name for this configuration
-    private String manufacturer;
-    private String model;
-    private int year;
-    private String category; // "street", "race", "drift", "rally", "formula", "prototype"
-    private String driveType; // "fwd", "rwd", "awd"
 
-    // Physics Configuration
-    private float mass; // Total car mass in kg
-    private float wheelbase;
-    private float trackWidth;
-    private float centerOfMassHeight;
-    private float frontWeightDistribution;
-    private Engine engine;
-    private Transmission transmission;
-    private AerodynamicsData aerodynamics;
-    private TireConfiguration tires;
-    private SuspensionConfiguration suspension;
-    private BrakeConfiguration brakes;
-
-    // Performance Stats
-    private float powerToWeightRatio;
-    private float zeroToHundredTime; // 0-100 km/h acceleration time
-    private float topSpeed; // Maximum speed in km/h
-    private float brakingDistance; // 100-0 km/h braking distance in meters
-    private float skidpadGrip; // Lateral grip in G's
-    private float nurburgringTime; // Theoretical Nürburgring lap time
-
-    // Visual Configuration
-    private String bodyColor;
-    private String rimColor;
-    private String interiorColor;
-    private VisualModifications visualMods;
-    private String liveryId; // Custom livery/decal configuration
-
-    // Tuning Configuration
-    private TuningSettings tuning;
-
-    // Ownership and Usage
-    private long purchasePrice;
-    private long currentValue;
-    private float damageLevel;
-    private long totalDistance; // Total distance driven in meters
-    private int raceCount; // Number of races with this car
-    private Instant createdAt;
-    private Instant lastUsed;
-    private boolean isLocked; // Locked for tuning changes during events
-
-    public CarConfiguration() {
-        this.category = "street";
-        this.driveType = "rwd";
-        this.mass = 1500.0f;
-        this.wheelbase = 2.7f;
-        this.trackWidth = 1.5f;
-        this.centerOfMassHeight = 0.5f;
-        this.frontWeightDistribution = 0.55f;
-        this.engine = new Engine();
-        this.transmission = new Transmission();
-        this.aerodynamics = new AerodynamicsData();
-        this.tires = new TireConfiguration();
-        this.suspension = new SuspensionConfiguration();
-        this.brakes = new BrakeConfiguration();
-        this.tuning = new TuningSettings();
-        this.visualMods = new VisualModifications();
-        this.damageLevel = 0.0f;
-        this.totalDistance = 0L;
-        this.raceCount = 0;
-        this.createdAt = Instant.now();
-        this.lastUsed = Instant.now();
-        this.isLocked = false;
-
-        calculatePerformanceStats();
-    }
-
-    // Getters and Setters
-    @DynamoDbPartitionKey
-    @JsonProperty("carId")
-    public String getCarId() {
-        return carId;
-    }
-
-    public void setCarId(String carId) {
-        this.carId = carId;
-    }
-
-    @DynamoDbSortKey
-    @JsonProperty("ownerId")
-    public String getOwnerId() {
-        return ownerId;
-    }
-
-    public void setOwnerId(String ownerId) {
-        this.ownerId = ownerId;
-    }
-
+    // Missing getters and setters for all fields
     public String getBaseName() {
         return baseName;
     }
@@ -751,18 +656,32 @@ package com.gt.models;
         this.currentValue = currentValue;
     }
 
-    public float getDamageLevel() {
-        return damageLevel;
+    public int getRaceCount() {
+        return raceCount;
     }
 
-    public void setDamageLevel(float damageLevel) {
-        this.damageLevel = Math.max(0.0f, Math.min(1.0f, damageLevel));
-        updateCurrentValue();
+    public void setRaceCount(int raceCount) {
+        this.raceCount = raceCount;
     }
 
-    public long getTotalDistance() {
-        return totalDistance;
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
-    public void setTotalDistance(long totalDistance) {
+    public void setCreatedAt(Instant createdAt) {
+        this.createdAt = createdAt;
+    }
+
+    public Instant getLastUsed() {
+        return lastUsed;
+    }
+
+    public void setLastUsed(Instant lastUsed) {
+        this.lastUsed = lastUsed;
+    }
+
+    public boolean isLocked() {
+        return isLocked;
+    }
+}
 

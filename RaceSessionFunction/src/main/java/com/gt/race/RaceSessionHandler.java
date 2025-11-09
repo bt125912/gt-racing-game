@@ -63,25 +63,24 @@ public class RaceSessionHandler implements RequestHandler<APIGatewayProxyRequest
 
             logger.info("Processing {} request for path: {}", httpMethod, path);
 
-            return switch (httpMethod) {
-                case "POST" -> {
+            switch (httpMethod) {
+                case "POST":
                     if (path.contains("/race/start")) {
-                        yield handleStartRace(input);
+                        return handleStartRace(input);
                     } else if (path.contains("/race/end")) {
-                        yield handleEndRace(input);
+                        return handleEndRace(input);
                     } else {
-                        yield createErrorResponse(400, "Invalid endpoint");
+                        return createErrorResponse(400, "Invalid endpoint");
                     }
-                }
-                case "GET" -> {
+                case "GET":
                     if (path.contains("/race/") && path.contains("/status")) {
-                        yield handleGetRaceStatus(input);
+                        return handleGetRaceStatus(input);
                     } else {
-                        yield createErrorResponse(400, "Invalid endpoint");
+                        return createErrorResponse(400, "Invalid endpoint");
                     }
-                }
-                default -> createErrorResponse(405, "Method not allowed");
-            };
+                default:
+                    return createErrorResponse(405, "Method not allowed");
+            }
 
         } catch (Exception e) {
             logger.error("Error processing request", e);

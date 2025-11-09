@@ -20,7 +20,7 @@
 ### **Step 2: Push Your Code (1 minute)**
 ```bash
 # Connect your local project to GitHub
-git remote add origin https://github.com/bt125912/gt-racing-game.git
+git remote add origin https://github.com/bt125912/gt-racing.git
 git branch -M main
 git push -u origin main
 ```
@@ -29,7 +29,7 @@ git push -u origin main
 ```bash
 # Go to your project board: https://github.com/users/bt125912/projects/8
 # Click Settings → Repository access → Add repository
-# Select: bt125912/gt-racing-game
+# Select: bt125912/gt-racing
 # Done!
 ```
 
@@ -118,7 +118,7 @@ git push -u origin main
 
 After completing the 3 steps above:
 
-- ✅ **Repository Live:** https://github.com/bt125912/gt-racing-game
+- ✅ **Repository Live:** https://github.com/bt125912/gt-racing
 - ✅ **Project Board Connected:** https://github.com/users/bt125912/projects/8
 - ✅ **Professional Game Project:** Ready for team collaboration
 - ✅ **Complete Implementation:** Backend + Unity client + documentation

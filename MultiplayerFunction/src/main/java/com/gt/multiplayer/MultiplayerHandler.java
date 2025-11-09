@@ -1,24 +1,3 @@
-
-        // Getters and setters
-        public int getPosition() { return position; }
-        public void setPosition(int position) { this.position = position; }
-
-        public String getPlayerId() { return playerId; }
-        public void setPlayerId(String playerId) { this.playerId = playerId; }
-
-        public String getPlayerName() { return playerName; }
-        public void setPlayerName(String playerName) { this.playerName = playerName; }
-
-        public float getBestLapTime() { return bestLapTime; }
-        public void setBestLapTime(float bestLapTime) { this.bestLapTime = bestLapTime; }
-
-        public float getTotalRaceTime() { return totalRaceTime; }
-        public void setTotalRaceTime(float totalRaceTime) { this.totalRaceTime = totalRaceTime; }
-
-        public int getLapsCompleted() { return lapsCompleted; }
-        public void setLapsCompleted(int lapsCompleted) { this.lapsCompleted = lapsCompleted; }
-    }
-}
 package com.gt.multiplayer;
 
 import com.amazonaws.services.lambda.runtime.Context;
@@ -27,118 +6,177 @@ import com.amazonaws.services.lambda.runtime.events.APIGatewayV2WebSocketEvent;
 import com.amazonaws.services.lambda.runtime.events.APIGatewayV2WebSocketResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import software.amazon.awssdk.core.SdkBytes;
+import com.gt.models.RaceResult;
+import com.gt.models.Player;
+import software.amazon.awssdk.enhanced.dynamodb.*;
+import software.amazon.awssdk.enhanced.dynamodb.model.*;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.apigatewaymanagementapi.ApiGatewayManagementApiClient;
 import software.amazon.awssdk.services.apigatewaymanagementapi.model.PostToConnectionRequest;
-import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
-import software.amazon.awssdk.services.dynamodb.model.*;
+import software.amazon.awssdk.core.SdkBytes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.URI;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
- * Real-time Multiplayer WebSocket Handler
- * Manages live racing sessions, position updates, and race synchronization
+ * Multiplayer Race Management Lambda Function
+ * Handles real-time multiplayer racing, lobbies, and race synchronization
  */
 public class MultiplayerHandler implements RequestHandler<APIGatewayV2WebSocketEvent, APIGatewayV2WebSocketResponse> {
 
     private static final Logger logger = LoggerFactory.getLogger(MultiplayerHandler.class);
     private final ObjectMapper objectMapper;
-    private final DynamoDbClient dynamoDbClient;
-    private ApiGatewayManagementApiClient apiGatewayClient;
+    private final DynamoDbEnhancedClient enhancedClient;
+    private final DynamoDbTable<RaceSession> raceSessionTable;
+    private final DynamoDbTable<PlayerConnection> connectionTable;
+    private final ApiGatewayManagementApiClient apiGatewayClient;
 
-    // In-memory session management (would use ElastiCache in production)
+    // In-memory cache for active sessions (in production, use Redis or DynamoDB)
     private static final Map<String, RaceSession> activeSessions = new ConcurrentHashMap<>();
-    private static final Map<String, String> connectionToPlayer = new ConcurrentHashMap<>();
 
     public MultiplayerHandler() {
         this.objectMapper = new ObjectMapper();
         this.objectMapper.registerModule(new JavaTimeModule());
-        this.dynamoDbClient = DynamoDbClient.builder().region(Region.US_EAST_1).build();
+
+        DynamoDbClient ddbClient = DynamoDbClient.builder()
+            .region(Region.US_EAST_1)
+            .build();
+
+        this.enhancedClient = DynamoDbEnhancedClient.builder()
+            .dynamoDbClient(ddbClient)
+            .build();
+
+        this.raceSessionTable = enhancedClient.table(
+            System.getenv("RACE_SESSIONS_TABLE"),
+            TableSchema.fromBean(RaceSession.class)
+        );
+
+        this.connectionTable = enhancedClient.table(
+            System.getenv("CONNECTIONS_TABLE"),
+            TableSchema.fromBean(PlayerConnection.class)
+        );
+
+        this.apiGatewayClient = ApiGatewayManagementApiClient.builder()
+            .region(Region.US_EAST_1)
+            .build();
     }
 
     @Override
     public APIGatewayV2WebSocketResponse handleRequest(APIGatewayV2WebSocketEvent event, Context context) {
         try {
-            String routeKey = event.getRequestContext().getRouteKey();
             String connectionId = event.getRequestContext().getConnectionId();
-            String domainName = event.getRequestContext().getDomainName();
-            String stage = event.getRequestContext().getStage();
+            String routeKey = event.getRequestContext().getRouteKey();
 
-            // Initialize API Gateway Management client for this request
-            String endpoint = String.format("https://%s/%s", domainName, stage);
-            this.apiGatewayClient = ApiGatewayManagementApiClient.builder()
-                .endpointOverride(URI.create(endpoint))
-                .region(Region.US_EAST_1)
-                .build();
+            logger.info("Processing WebSocket event - Route: {}, Connection: {}", routeKey, connectionId);
 
-            logger.info("WebSocket event: route={}, connectionId={}", routeKey, connectionId);
-
-            return switch (routeKey) {
-                case "$connect" -> handleConnect(event, connectionId);
-                case "$disconnect" -> handleDisconnect(event, connectionId);
-                case "joinRace" -> handleJoinRace(event, connectionId);
-                case "updatePosition" -> handlePositionUpdate(event, connectionId);
-                case "finishLap" -> handleLapFinish(event, connectionId);
-                case "leaveRace" -> handleLeaveRace(event, connectionId);
-                case "chatMessage" -> handleChatMessage(event, connectionId);
-                default -> createResponse(400, "Unknown route: " + routeKey);
-            };
+            switch (routeKey) {
+                case "$connect":
+                    return handleConnect(event);
+                case "$disconnect":
+                    return handleDisconnect(event);
+                case "joinLobby":
+                    return handleJoinLobby(event);
+                case "createRace":
+                    return handleCreateRace(event);
+                case "startRace":
+                    return handleStartRace(event);
+                case "raceUpdate":
+                    return handleRaceUpdate(event);
+                case "finishRace":
+                    return handleFinishRace(event);
+                default:
+                    logger.warn("Unknown route: {}", routeKey);
+                    return createResponse(400, "Unknown route");
+            }
 
         } catch (Exception e) {
-            logger.error("Error processing WebSocket event", e);
+            logger.error("Error processing WebSocket request", e);
             return createResponse(500, "Internal server error");
         }
     }
 
-    private APIGatewayV2WebSocketResponse handleConnect(APIGatewayV2WebSocketEvent event, String connectionId) {
-        logger.info("New WebSocket connection: {}", connectionId);
-
-        // Store connection in DynamoDB for persistence
-        storeConnection(connectionId);
-
-        // Send welcome message
-        sendToConnection(connectionId, new WebSocketMessage("connected",
-            Map.of("connectionId", connectionId, "timestamp", Instant.now())));
-
-        return createResponse(200, "Connected");
-    }
-
-    private APIGatewayV2WebSocketResponse handleDisconnect(APIGatewayV2WebSocketEvent event, String connectionId) {
-        logger.info("WebSocket disconnection: {}", connectionId);
-
-        // Remove player from any active race sessions
-        String playerId = connectionToPlayer.get(connectionId);
-        if (playerId != null) {
-            removePlayerFromActiveSessions(playerId, connectionId);
-        }
-
-        // Clean up connection data
-        removeConnection(connectionId);
-        connectionToPlayer.remove(connectionId);
-
-        return createResponse(200, "Disconnected");
-    }
-
-    private APIGatewayV2WebSocketResponse handleJoinRace(APIGatewayV2WebSocketEvent event, String connectionId) {
+    /**
+     * Handle WebSocket connection
+     */
+    private APIGatewayV2WebSocketResponse handleConnect(APIGatewayV2WebSocketEvent event) {
         try {
-            JoinRaceRequest request = objectMapper.readValue(event.getBody(), JoinRaceRequest.class);
+            String connectionId = event.getRequestContext().getConnectionId();
+            Map<String, String> queryParams = event.getQueryStringParameters();
 
-            if (request.getPlayerId() == null || request.getRaceId() == null) {
-                sendError(connectionId, "Missing required fields: playerId, raceId");
-                return createResponse(400, "Invalid request");
+            if (queryParams == null || !queryParams.containsKey("playerId")) {
+                return createResponse(400, "Player ID is required");
             }
 
-            // Associate connection with player
-            connectionToPlayer.put(connectionId, request.getPlayerId());
+            String playerId = queryParams.get("playerId");
+            String playerName = queryParams.get("playerName");
 
-            // Get or create race session
-            RaceSession session = getOrCreateRaceSession(request.getRaceId(), request);
+            // Store connection info
+            PlayerConnection connection = new PlayerConnection();
+            connection.setConnectionId(connectionId);
+            connection.setPlayerId(playerId);
+            connection.setPlayerName(playerName);
+            connection.setConnectedAt(Instant.now());
+            connection.setStatus("CONNECTED");
+
+            connectionTable.putItem(connection);
+
+            logger.info("Player {} connected with connection {}", playerId, connectionId);
+
+            return createResponse(200, "Connected successfully");
+
+        } catch (Exception e) {
+            logger.error("Error handling connect", e);
+            return createResponse(500, "Failed to connect");
+        }
+    }
+
+    /**
+     * Handle WebSocket disconnection
+     */
+    private APIGatewayV2WebSocketResponse handleDisconnect(APIGatewayV2WebSocketEvent event) {
+        try {
+            String connectionId = event.getRequestContext().getConnectionId();
+
+            // Find and remove connection
+            PlayerConnection connection = connectionTable.getItem(Key.builder()
+                .partitionValue(connectionId)
+                .build());
+
+            if (connection != null) {
+                // Remove from any active race sessions
+                removePlayerFromActiveSessions(connection.getPlayerId());
+
+                // Delete connection record
+                connectionTable.deleteItem(Key.builder()
+                    .partitionValue(connectionId)
+                    .build());
+
+                logger.info("Player {} disconnected", connection.getPlayerId());
+            }
+
+            return createResponse(200, "Disconnected");
+
+        } catch (Exception e) {
+            logger.error("Error handling disconnect", e);
+            return createResponse(500, "Failed to disconnect");
+        }
+    }
+
+    /**
+     * Handle joining a racing lobby
+     */
+    private APIGatewayV2WebSocketResponse handleJoinLobby(APIGatewayV2WebSocketEvent event) {
+        try {
+            JoinLobbyRequest request = objectMapper.readValue(event.getBody(), JoinLobbyRequest.class);
+            String connectionId = event.getRequestContext().getConnectionId();
+
+            // Find or create lobby
+            RaceSession session = findOrCreateLobby(request.getTrackId(), request.getRaceMode());
 
             // Add player to session
             RaceParticipant participant = new RaceParticipant();
@@ -146,478 +184,359 @@ public class MultiplayerHandler implements RequestHandler<APIGatewayV2WebSocketE
             participant.setPlayerName(request.getPlayerName());
             participant.setCarId(request.getCarId());
             participant.setConnectionId(connectionId);
-            participant.setJoinTime(Instant.now());
-            participant.setCurrentPosition(new PlayerPosition());
+            participant.setStatus("WAITING");
+            participant.setJoinedAt(Instant.now());
 
             session.addParticipant(participant);
+            activeSessions.put(session.getSessionId(), session);
 
-            // Notify all participants about new player
-            broadcastToSession(request.getRaceId(), new WebSocketMessage("playerJoined", participant));
+            // Notify all players in the lobby
+            broadcastToSession(session.getSessionId(), "playerJoined", participant);
 
-            // Send session info to new player
-            SessionInfo sessionInfo = new SessionInfo();
-            sessionInfo.setRaceId(request.getRaceId());
-            sessionInfo.setTrackId(session.getTrackId());
-            sessionInfo.setParticipantCount(session.getParticipants().size());
-            sessionInfo.setParticipants(session.getParticipants());
-            sessionInfo.setSessionStatus(session.getStatus());
+            LobbyResponse response = new LobbyResponse();
+            response.setSessionId(session.getSessionId());
+            response.setStatus(session.getStatus());
+            response.setParticipants(session.getParticipants());
+            response.setTrackId(session.getTrackId());
 
-            sendToConnection(connectionId, new WebSocketMessage("sessionJoined", sessionInfo));
-
-            logger.info("Player {} joined race session {}", request.getPlayerId(), request.getRaceId());
-            return createResponse(200, "Joined race");
+            return createResponse(200, objectMapper.writeValueAsString(response));
 
         } catch (Exception e) {
-            logger.error("Error joining race", e);
-            sendError(connectionId, "Failed to join race");
-            return createResponse(500, "Internal error");
+            logger.error("Error joining lobby", e);
+            return createResponse(500, "Failed to join lobby");
         }
     }
 
-    private APIGatewayV2WebSocketResponse handlePositionUpdate(APIGatewayV2WebSocketEvent event, String connectionId) {
+    /**
+     * Handle creating a new race
+     */
+    private APIGatewayV2WebSocketResponse handleCreateRace(APIGatewayV2WebSocketEvent event) {
         try {
-            PositionUpdateRequest request = objectMapper.readValue(event.getBody(), PositionUpdateRequest.class);
+            CreateRaceRequest request = objectMapper.readValue(event.getBody(), CreateRaceRequest.class);
+            String connectionId = event.getRequestContext().getConnectionId();
 
-            String playerId = connectionToPlayer.get(connectionId);
-            if (playerId == null) {
-                sendError(connectionId, "Player not identified");
-                return createResponse(400, "Player not identified");
-            }
-
-            // Find race session for this player
-            RaceSession session = findPlayerSession(playerId);
-            if (session == null) {
-                sendError(connectionId, "Not in any race session");
-                return createResponse(400, "Not in race");
-            }
-
-            // Update player position
-            RaceParticipant participant = session.getParticipant(playerId);
-            if (participant != null) {
-                participant.setCurrentPosition(request.getPosition());
-                participant.setLastUpdate(Instant.now());
-
-                // Broadcast position update to other players in race
-                PositionBroadcast broadcast = new PositionBroadcast();
-                broadcast.setPlayerId(playerId);
-                broadcast.setPosition(request.getPosition());
-                broadcast.setTimestamp(Instant.now());
-
-                broadcastToSessionExcept(session.getRaceId(), connectionId,
-                    new WebSocketMessage("positionUpdate", broadcast));
-            }
-
-            return createResponse(200, "Position updated");
-
-        } catch (Exception e) {
-            logger.error("Error updating position", e);
-            return createResponse(500, "Internal error");
-        }
-    }
-
-    private APIGatewayV2WebSocketResponse handleLapFinish(APIGatewayV2WebSocketEvent event, String connectionId) {
-        try {
-            LapFinishRequest request = objectMapper.readValue(event.getBody(), LapFinishRequest.class);
-
-            String playerId = connectionToPlayer.get(connectionId);
-            RaceSession session = findPlayerSession(playerId);
-
-            if (session != null) {
-                RaceParticipant participant = session.getParticipant(playerId);
-                if (participant != null) {
-                    participant.addLapTime(request.getLapTime());
-                    participant.setCurrentLap(request.getLapNumber());
-
-                    // Broadcast lap completion
-                    LapCompleteBroadcast broadcast = new LapCompleteBroadcast();
-                    broadcast.setPlayerId(playerId);
-                    broadcast.setPlayerName(participant.getPlayerName());
-                    broadcast.setLapNumber(request.getLapNumber());
-                    broadcast.setLapTime(request.getLapTime());
-                    broadcast.setBestLap(participant.getBestLapTime());
-                    broadcast.setPosition(calculateRacePosition(session, participant));
-
-                    broadcastToSession(session.getRaceId(),
-                        new WebSocketMessage("lapCompleted", broadcast));
-
-                    // Check for race completion
-                    if (request.getLapNumber() >= session.getTotalLaps()) {
-                        handleRaceCompletion(session, participant);
-                    }
-                }
-            }
-
-            return createResponse(200, "Lap recorded");
-
-        } catch (Exception e) {
-            logger.error("Error recording lap", e);
-            return createResponse(500, "Internal error");
-        }
-    }
-
-    private APIGatewayV2WebSocketResponse handleLeaveRace(APIGatewayV2WebSocketEvent event, String connectionId) {
-        String playerId = connectionToPlayer.get(connectionId);
-        if (playerId != null) {
-            removePlayerFromActiveSessions(playerId, connectionId);
-        }
-
-        return createResponse(200, "Left race");
-    }
-
-    private APIGatewayV2WebSocketResponse handleChatMessage(APIGatewayV2WebSocketEvent event, String connectionId) {
-        try {
-            ChatMessageRequest request = objectMapper.readValue(event.getBody(), ChatMessageRequest.class);
-
-            String playerId = connectionToPlayer.get(connectionId);
-            RaceSession session = findPlayerSession(playerId);
-
-            if (session != null) {
-                RaceParticipant participant = session.getParticipant(playerId);
-                if (participant != null) {
-                    ChatMessage chatMessage = new ChatMessage();
-                    chatMessage.setPlayerId(playerId);
-                    chatMessage.setPlayerName(participant.getPlayerName());
-                    chatMessage.setMessage(request.getMessage());
-                    chatMessage.setTimestamp(Instant.now());
-
-                    broadcastToSession(session.getRaceId(),
-                        new WebSocketMessage("chatMessage", chatMessage));
-                }
-            }
-
-            return createResponse(200, "Message sent");
-
-        } catch (Exception e) {
-            logger.error("Error sending chat message", e);
-            return createResponse(500, "Internal error");
-        }
-    }
-
-    // Helper methods
-
-    private RaceSession getOrCreateRaceSession(String raceId, JoinRaceRequest request) {
-        return activeSessions.computeIfAbsent(raceId, id -> {
             RaceSession session = new RaceSession();
-            session.setRaceId(raceId);
+            session.setSessionId(UUID.randomUUID().toString());
+            session.setHostPlayerId(request.getPlayerId());
             session.setTrackId(request.getTrackId());
+            session.setRaceMode(request.getRaceMode());
+            session.setMaxParticipants(request.getMaxParticipants());
+            session.setLapCount(request.getLapCount());
+            session.setStatus("LOBBY");
             session.setCreatedAt(Instant.now());
-            session.setStatus("WAITING");
-            session.setMaxParticipants(16); // Default max players
-            session.setTotalLaps(request.getTotalLaps() != null ? request.getTotalLaps() : 5);
             session.setParticipants(new ArrayList<>());
-            return session;
-        });
-    }
 
-    private void removePlayerFromActiveSessions(String playerId, String connectionId) {
-        for (RaceSession session : activeSessions.values()) {
-            RaceParticipant participant = session.removeParticipant(playerId);
-            if (participant != null) {
-                // Notify other players
-                broadcastToSessionExcept(session.getRaceId(), connectionId,
-                    new WebSocketMessage("playerLeft",
-                        Map.of("playerId", playerId, "playerName", participant.getPlayerName())));
+            // Add host as first participant
+            RaceParticipant host = new RaceParticipant();
+            host.setPlayerId(request.getPlayerId());
+            host.setPlayerName(request.getPlayerName());
+            host.setCarId(request.getCarId());
+            host.setConnectionId(connectionId);
+            host.setStatus("WAITING");
+            host.setJoinedAt(Instant.now());
 
-                // Remove empty sessions
-                if (session.getParticipants().isEmpty()) {
-                    activeSessions.remove(session.getRaceId());
-                }
-                break;
-            }
+            session.addParticipant(host);
+            activeSessions.put(session.getSessionId(), session);
+
+            // Save to database
+            raceSessionTable.putItem(session);
+
+            RaceCreatedResponse response = new RaceCreatedResponse();
+            response.setSessionId(session.getSessionId());
+            response.setStatus("SUCCESS");
+            response.setMessage("Race created successfully");
+
+            return createResponse(200, objectMapper.writeValueAsString(response));
+
+        } catch (Exception e) {
+            logger.error("Error creating race", e);
+            return createResponse(500, "Failed to create race");
         }
     }
 
-    private RaceSession findPlayerSession(String playerId) {
-        for (RaceSession session : activeSessions.values()) {
-            if (session.getParticipant(playerId) != null) {
-                return session;
-            }
-        }
-        return null;
-    }
-
-    private int calculateRacePosition(RaceSession session, RaceParticipant participant) {
-        List<RaceParticipant> participants = new ArrayList<>(session.getParticipants());
-
-        // Sort by lap number (descending) then by best lap time (ascending)
-        participants.sort((a, b) -> {
-            int lapComparison = Integer.compare(b.getCurrentLap(), a.getCurrentLap());
-            if (lapComparison != 0) return lapComparison;
-
-            float aTime = a.getBestLapTime();
-            float bTime = b.getBestLapTime();
-            if (aTime <= 0) aTime = Float.MAX_VALUE;
-            if (bTime <= 0) bTime = Float.MAX_VALUE;
-
-            return Float.compare(aTime, bTime);
-        });
-
-        for (int i = 0; i < participants.size(); i++) {
-            if (participants.get(i).getPlayerId().equals(participant.getPlayerId())) {
-                return i + 1;
-            }
-        }
-
-        return participants.size();
-    }
-
-    private void handleRaceCompletion(RaceSession session, RaceParticipant participant) {
-        participant.setFinished(true);
-        participant.setFinishTime(Instant.now());
-
-        // Check if all players finished
-        boolean allFinished = session.getParticipants().stream()
-            .allMatch(RaceParticipant::isFinished);
-
-        if (allFinished) {
-            session.setStatus("COMPLETED");
-
-            // Generate final results
-            List<RaceResult> results = generateRaceResults(session);
-
-            broadcastToSession(session.getRaceId(),
-                new WebSocketMessage("raceCompleted",
-                    Map.of("results", results, "sessionId", session.getRaceId())));
-
-            // Clean up session after a delay
-            // In production, you'd schedule this cleanup
-        }
-    }
-
-    private List<RaceResult> generateRaceResults(RaceSession session) {
-        List<RaceParticipant> participants = new ArrayList<>(session.getParticipants());
-        participants.sort((a, b) -> {
-            if (a.getFinishTime() == null) return 1;
-            if (b.getFinishTime() == null) return -1;
-            return a.getFinishTime().compareTo(b.getFinishTime());
-        });
-
-        List<RaceResult> results = new ArrayList<>();
-        for (int i = 0; i < participants.size(); i++) {
-            RaceParticipant p = participants.get(i);
-            RaceResult result = new RaceResult();
-            result.setPosition(i + 1);
-            result.setPlayerId(p.getPlayerId());
-            result.setPlayerName(p.getPlayerName());
-            result.setBestLapTime(p.getBestLapTime());
-            result.setTotalRaceTime(p.getTotalRaceTime());
-            result.setLapsCompleted(p.getCurrentLap());
-            results.add(result);
-        }
-
-        return results;
-    }
-
-    private void broadcastToSession(String raceId, WebSocketMessage message) {
-        RaceSession session = activeSessions.get(raceId);
-        if (session != null) {
-            for (RaceParticipant participant : session.getParticipants()) {
-                sendToConnection(participant.getConnectionId(), message);
-            }
-        }
-    }
-
-    private void broadcastToSessionExcept(String raceId, String excludeConnectionId, WebSocketMessage message) {
-        RaceSession session = activeSessions.get(raceId);
-        if (session != null) {
-            for (RaceParticipant participant : session.getParticipants()) {
-                if (!participant.getConnectionId().equals(excludeConnectionId)) {
-                    sendToConnection(participant.getConnectionId(), message);
-                }
-            }
-        }
-    }
-
-    private void sendToConnection(String connectionId, WebSocketMessage message) {
+    /**
+     * Handle starting a race
+     */
+    private APIGatewayV2WebSocketResponse handleStartRace(APIGatewayV2WebSocketEvent event) {
         try {
+            StartRaceRequest request = objectMapper.readValue(event.getBody(), StartRaceRequest.class);
+
+            RaceSession session = activeSessions.get(request.getSessionId());
+            if (session == null) {
+                return createResponse(404, "Race session not found");
+            }
+
+            if (!session.getHostPlayerId().equals(request.getPlayerId())) {
+                return createResponse(403, "Only host can start the race");
+            }
+
+            // Start the race
+            session.setStatus("RACING");
+            session.setStartedAt(Instant.now());
+
+            // Set all participants to racing status
+            session.getParticipants().forEach(p -> p.setStatus("RACING"));
+
+            // Broadcast race start to all participants
+            RaceStartEvent startEvent = new RaceStartEvent();
+            startEvent.setSessionId(session.getSessionId());
+            startEvent.setStartTime(session.getStartedAt());
+            startEvent.setCountdownStart(Instant.now().plusSeconds(3)); // 3-second countdown
+
+            broadcastToSession(session.getSessionId(), "raceStart", startEvent);
+
+            return createResponse(200, "Race started");
+
+        } catch (Exception e) {
+            logger.error("Error starting race", e);
+            return createResponse(500, "Failed to start race");
+        }
+    }
+
+    /**
+     * Handle real-time race updates (position, lap times, etc.)
+     */
+    private APIGatewayV2WebSocketResponse handleRaceUpdate(APIGatewayV2WebSocketEvent event) {
+        try {
+            RaceUpdateEvent update = objectMapper.readValue(event.getBody(), RaceUpdateEvent.class);
+
+            RaceSession session = activeSessions.get(update.getSessionId());
+            if (session == null) {
+                return createResponse(404, "Race session not found");
+            }
+
+            // Update participant data
+            RaceParticipant participant = session.getParticipants().stream()
+                .filter(p -> p.getPlayerId().equals(update.getPlayerId()))
+                .findFirst()
+                .orElse(null);
+
+            if (participant != null) {
+                participant.setCurrentLap(update.getCurrentLap());
+                participant.setPosition(update.getPosition());
+                participant.setBestLapTime(update.getBestLapTime());
+                participant.setLastLapTime(update.getLastLapTime());
+                participant.setTotalRaceTime(update.getTotalRaceTime());
+            }
+
+            // Broadcast update to all participants
+            broadcastToSession(session.getSessionId(), "raceUpdate", update);
+
+            return createResponse(200, "Update processed");
+
+        } catch (Exception e) {
+            logger.error("Error processing race update", e);
+            return createResponse(500, "Failed to process update");
+        }
+    }
+
+    /**
+     * Handle race completion
+     */
+    private APIGatewayV2WebSocketResponse handleFinishRace(APIGatewayV2WebSocketEvent event) {
+        try {
+            FinishRaceRequest request = objectMapper.readValue(event.getBody(), FinishRaceRequest.class);
+
+            RaceSession session = activeSessions.get(request.getSessionId());
+            if (session == null) {
+                return createResponse(404, "Race session not found");
+            }
+
+            // Mark participant as finished
+            RaceParticipant participant = session.getParticipants().stream()
+                .filter(p -> p.getPlayerId().equals(request.getPlayerId()))
+                .findFirst()
+                .orElse(null);
+
+            if (participant != null) {
+                participant.setStatus("FINISHED");
+                participant.setFinishTime(Instant.now());
+                participant.setFinalPosition(request.getPosition());
+                participant.setTotalRaceTime(request.getTotalTime());
+            }
+
+            // Check if race is complete (all players finished)
+            boolean allFinished = session.getParticipants().stream()
+                .allMatch(p -> "FINISHED".equals(p.getStatus()));
+
+            if (allFinished) {
+                session.setStatus("COMPLETED");
+                session.setCompletedAt(Instant.now());
+
+                // Generate final results
+                List<RaceParticipant> finalResults = session.getParticipants().stream()
+                    .sorted((a, b) -> Integer.compare(a.getFinalPosition(), b.getFinalPosition()))
+                    .collect(Collectors.toList());
+
+                RaceResultsEvent resultsEvent = new RaceResultsEvent();
+                resultsEvent.setSessionId(session.getSessionId());
+                resultsEvent.setResults(finalResults);
+
+                broadcastToSession(session.getSessionId(), "raceResults", resultsEvent);
+
+                // Remove from active sessions
+                activeSessions.remove(session.getSessionId());
+            }
+
+            return createResponse(200, "Finish processed");
+
+        } catch (Exception e) {
+            logger.error("Error processing race finish", e);
+            return createResponse(500, "Failed to process finish");
+        }
+    }
+
+    /**
+     * Find or create a lobby for matchmaking
+     */
+    private RaceSession findOrCreateLobby(String trackId, String raceMode) {
+        // Find existing lobby with available slots
+        RaceSession existingLobby = activeSessions.values().stream()
+            .filter(session -> "LOBBY".equals(session.getStatus()))
+            .filter(session -> trackId.equals(session.getTrackId()))
+            .filter(session -> raceMode.equals(session.getRaceMode()))
+            .filter(session -> session.getParticipants().size() < session.getMaxParticipants())
+            .findFirst()
+            .orElse(null);
+
+        if (existingLobby != null) {
+            return existingLobby;
+        }
+
+        // Create new lobby
+        RaceSession newSession = new RaceSession();
+        newSession.setSessionId(UUID.randomUUID().toString());
+        newSession.setTrackId(trackId);
+        newSession.setRaceMode(raceMode);
+        newSession.setMaxParticipants(8); // Default lobby size
+        newSession.setLapCount(3); // Default lap count
+        newSession.setStatus("LOBBY");
+        newSession.setCreatedAt(Instant.now());
+        newSession.setParticipants(new ArrayList<>());
+
+        return newSession;
+    }
+
+    /**
+     * Broadcast message to all participants in a session
+     */
+    private void broadcastToSession(String sessionId, String messageType, Object data) {
+        try {
+            RaceSession session = activeSessions.get(sessionId);
+            if (session == null) {
+                return;
+            }
+
+            WebSocketMessage message = new WebSocketMessage();
+            message.setType(messageType);
+            message.setData(data);
+            message.setTimestamp(Instant.now());
+
             String messageJson = objectMapper.writeValueAsString(message);
+
+            for (RaceParticipant participant : session.getParticipants()) {
+                try {
+                    sendToConnection(participant.getConnectionId(), messageJson);
+                } catch (Exception e) {
+                    logger.error("Failed to send message to connection {}", participant.getConnectionId(), e);
+                }
+            }
+
+        } catch (Exception e) {
+            logger.error("Error broadcasting to session", e);
+        }
+    }
+
+    /**
+     * Send message to specific WebSocket connection
+     */
+    private void sendToConnection(String connectionId, String message) {
+        try {
             PostToConnectionRequest request = PostToConnectionRequest.builder()
                 .connectionId(connectionId)
-                .data(SdkBytes.fromUtf8String(messageJson))
+                .data(SdkBytes.fromUtf8String(message))
                 .build();
 
             apiGatewayClient.postToConnection(request);
         } catch (Exception e) {
-            logger.error("Failed to send message to connection {}: {}", connectionId, e.getMessage());
-            // Connection might be stale, could clean it up here
+            logger.error("Failed to send to connection {}", connectionId, e);
         }
     }
 
-    private void sendError(String connectionId, String error) {
-        sendToConnection(connectionId, new WebSocketMessage("error", Map.of("message", error)));
+    /**
+     * Remove player from all active sessions
+     */
+    private void removePlayerFromActiveSessions(String playerId) {
+        activeSessions.values().forEach(session -> {
+            session.getParticipants().removeIf(p -> p.getPlayerId().equals(playerId));
+        });
     }
 
-    private void storeConnection(String connectionId) {
-        // Store connection info in DynamoDB for persistence
-        Map<String, AttributeValue> item = Map.of(
-            "connectionId", AttributeValue.builder().s(connectionId).build(),
-            "connectedAt", AttributeValue.builder().s(Instant.now().toString()).build(),
-            "ttl", AttributeValue.builder().n(String.valueOf(Instant.now().getEpochSecond() + 3600)).build()
-        );
-
-        PutItemRequest request = PutItemRequest.builder()
-            .tableName("GT-WebSocket-Connections")
-            .item(item)
-            .build();
-
-        try {
-            dynamoDbClient.putItem(request);
-        } catch (Exception e) {
-            logger.error("Failed to store connection", e);
-        }
-    }
-
-    private void removeConnection(String connectionId) {
-        DeleteItemRequest request = DeleteItemRequest.builder()
-            .tableName("GT-WebSocket-Connections")
-            .key(Map.of("connectionId", AttributeValue.builder().s(connectionId).build()))
-            .build();
-
-        try {
-            dynamoDbClient.deleteItem(request);
-        } catch (Exception e) {
-            logger.error("Failed to remove connection", e);
-        }
-    }
-
+    /**
+     * Create WebSocket response
+     */
     private APIGatewayV2WebSocketResponse createResponse(int statusCode, String body) {
-        return APIGatewayV2WebSocketResponse.builder()
-            .withStatusCode(statusCode)
-            .withBody(body)
-            .build();
+        APIGatewayV2WebSocketResponse response = new APIGatewayV2WebSocketResponse();
+        response.setStatusCode(statusCode);
+        response.setBody(body);
+        return response;
     }
 
-    // Data classes for WebSocket communication
-
-    public static class WebSocketMessage {
-        private String type;
-        private Object data;
-        private Instant timestamp;
-
-        public WebSocketMessage(String type, Object data) {
-            this.type = type;
-            this.data = data;
-            this.timestamp = Instant.now();
-        }
-
-        // Getters and setters
-        public String getType() { return type; }
-        public void setType(String type) { this.type = type; }
-
-        public Object getData() { return data; }
-        public void setData(Object data) { this.data = data; }
-
-        public Instant getTimestamp() { return timestamp; }
-        public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
-    }
-
-    public static class JoinRaceRequest {
-        private String playerId;
-        private String playerName;
-        private String raceId;
-        private String trackId;
-        private String carId;
-        private Integer totalLaps;
-
-        // Getters and setters
-        public String getPlayerId() { return playerId; }
-        public void setPlayerId(String playerId) { this.playerId = playerId; }
-
-        public String getPlayerName() { return playerName; }
-        public void setPlayerName(String playerName) { this.playerName = playerName; }
-
-        public String getRaceId() { return raceId; }
-        public void setRaceId(String raceId) { this.raceId = raceId; }
-
-        public String getTrackId() { return trackId; }
-        public void setTrackId(String trackId) { this.trackId = trackId; }
-
-        public String getCarId() { return carId; }
-        public void setCarId(String carId) { this.carId = carId; }
-
-        public Integer getTotalLaps() { return totalLaps; }
-        public void setTotalLaps(Integer totalLaps) { this.totalLaps = totalLaps; }
-    }
-
-    public static class PositionUpdateRequest {
-        private PlayerPosition position;
-
-        public PlayerPosition getPosition() { return position; }
-        public void setPosition(PlayerPosition position) { this.position = position; }
-    }
-
-    public static class PlayerPosition {
-        private float x, y, z; // World coordinates
-        private float rotationY; // Heading
-        private float speed; // km/h
-        private float lapProgress; // 0.0 to 1.0
-
-        // Getters and setters
-        public float getX() { return x; }
-        public void setX(float x) { this.x = x; }
-
-        public float getY() { return y; }
-        public void setY(float y) { this.y = y; }
-
-        public float getZ() { return z; }
-        public void setZ(float z) { this.z = z; }
-
-        public float getRotationY() { return rotationY; }
-        public void setRotationY(float rotationY) { this.rotationY = rotationY; }
-
-        public float getSpeed() { return speed; }
-        public void setSpeed(float speed) { this.speed = speed; }
-
-        public float getLapProgress() { return lapProgress; }
-        public void setLapProgress(float lapProgress) { this.lapProgress = lapProgress; }
-    }
-
-    // Additional data classes would continue here...
-    // (RaceSession, RaceParticipant, etc. - shortened for brevity)
+    // Data Transfer Objects
 
     public static class RaceSession {
-        private String raceId;
+        private String sessionId;
+        private String hostPlayerId;
         private String trackId;
-        private String status;
+        private String raceMode;
         private int maxParticipants;
-        private int totalLaps;
-        private Instant createdAt;
+        private int lapCount;
+        private String status;
         private List<RaceParticipant> participants;
-
-        public void addParticipant(RaceParticipant participant) {
-            participants.add(participant);
-        }
-
-        public RaceParticipant removeParticipant(String playerId) {
-            return participants.removeIf(p -> p.getPlayerId().equals(playerId)) ?
-                participants.stream().filter(p -> p.getPlayerId().equals(playerId)).findFirst().orElse(null) : null;
-        }
-
-        public RaceParticipant getParticipant(String playerId) {
-            return participants.stream().filter(p -> p.getPlayerId().equals(playerId)).findFirst().orElse(null);
-        }
+        private Instant createdAt;
+        private Instant startedAt;
+        private Instant completedAt;
 
         // Getters and setters
-        public String getRaceId() { return raceId; }
-        public void setRaceId(String raceId) { this.raceId = raceId; }
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+
+        public String getHostPlayerId() { return hostPlayerId; }
+        public void setHostPlayerId(String hostPlayerId) { this.hostPlayerId = hostPlayerId; }
 
         public String getTrackId() { return trackId; }
         public void setTrackId(String trackId) { this.trackId = trackId; }
 
-        public String getStatus() { return status; }
-        public void setStatus(String status) { this.status = status; }
+        public String getRaceMode() { return raceMode; }
+        public void setRaceMode(String raceMode) { this.raceMode = raceMode; }
 
         public int getMaxParticipants() { return maxParticipants; }
         public void setMaxParticipants(int maxParticipants) { this.maxParticipants = maxParticipants; }
 
-        public int getTotalLaps() { return totalLaps; }
-        public void setTotalLaps(int totalLaps) { this.totalLaps = totalLaps; }
+        public int getLapCount() { return lapCount; }
+        public void setLapCount(int lapCount) { this.lapCount = lapCount; }
+
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+
+        public List<RaceParticipant> getParticipants() { return participants; }
+        public void setParticipants(List<RaceParticipant> participants) { this.participants = participants; }
+
+        public void addParticipant(RaceParticipant participant) {
+            if (this.participants == null) {
+                this.participants = new ArrayList<>();
+            }
+            this.participants.add(participant);
+        }
 
         public Instant getCreatedAt() { return createdAt; }
         public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
-        public List<RaceParticipant> getParticipants() { return participants; }
-        public void setParticipants(List<RaceParticipant> participants) { this.participants = participants; }
+        public Instant getStartedAt() { return startedAt; }
+        public void setStartedAt(Instant startedAt) { this.startedAt = startedAt; }
+
+        public Instant getCompletedAt() { return completedAt; }
+        public void setCompletedAt(Instant completedAt) { this.completedAt = completedAt; }
     }
 
     public static class RaceParticipant {
@@ -625,25 +544,15 @@ public class MultiplayerHandler implements RequestHandler<APIGatewayV2WebSocketE
         private String playerName;
         private String carId;
         private String connectionId;
-        private Instant joinTime;
-        private PlayerPosition currentPosition;
+        private String status;
         private int currentLap;
-        private List<Float> lapTimes = new ArrayList<>();
-        private boolean finished;
+        private int position;
+        private float bestLapTime;
+        private float lastLapTime;
+        private float totalRaceTime;
+        private int finalPosition;
+        private Instant joinedAt;
         private Instant finishTime;
-        private Instant lastUpdate;
-
-        public void addLapTime(float lapTime) {
-            lapTimes.add(lapTime);
-        }
-
-        public float getBestLapTime() {
-            return lapTimes.stream().min(Float::compare).orElse(0.0f);
-        }
-
-        public float getTotalRaceTime() {
-            return lapTimes.stream().reduce(0.0f, Float::sum);
-        }
 
         // Getters and setters
         public String getPlayerId() { return playerId; }
@@ -658,139 +567,218 @@ public class MultiplayerHandler implements RequestHandler<APIGatewayV2WebSocketE
         public String getConnectionId() { return connectionId; }
         public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
 
-        public Instant getJoinTime() { return joinTime; }
-        public void setJoinTime(Instant joinTime) { this.joinTime = joinTime; }
-
-        public PlayerPosition getCurrentPosition() { return currentPosition; }
-        public void setCurrentPosition(PlayerPosition currentPosition) { this.currentPosition = currentPosition; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
 
         public int getCurrentLap() { return currentLap; }
         public void setCurrentLap(int currentLap) { this.currentLap = currentLap; }
 
-        public List<Float> getLapTimes() { return lapTimes; }
-        public void setLapTimes(List<Float> lapTimes) { this.lapTimes = lapTimes; }
+        public int getPosition() { return position; }
+        public void setPosition(int position) { this.position = position; }
 
-        public boolean isFinished() { return finished; }
-        public void setFinished(boolean finished) { this.finished = finished; }
+        public float getBestLapTime() { return bestLapTime; }
+        public void setBestLapTime(float bestLapTime) { this.bestLapTime = bestLapTime; }
+
+        public float getLastLapTime() { return lastLapTime; }
+        public void setLastLapTime(float lastLapTime) { this.lastLapTime = lastLapTime; }
+
+        public float getTotalRaceTime() { return totalRaceTime; }
+        public void setTotalRaceTime(float totalRaceTime) { this.totalRaceTime = totalRaceTime; }
+
+        public int getFinalPosition() { return finalPosition; }
+        public void setFinalPosition(int finalPosition) { this.finalPosition = finalPosition; }
+
+        public Instant getJoinedAt() { return joinedAt; }
+        public void setJoinedAt(Instant joinedAt) { this.joinedAt = joinedAt; }
 
         public Instant getFinishTime() { return finishTime; }
         public void setFinishTime(Instant finishTime) { this.finishTime = finishTime; }
-
-        public Instant getLastUpdate() { return lastUpdate; }
-        public void setLastUpdate(Instant lastUpdate) { this.lastUpdate = lastUpdate; }
     }
 
-    // Additional supporting classes (shortened for brevity)
-    public static class LapFinishRequest {
-        private int lapNumber;
-        private float lapTime;
-
-        public int getLapNumber() { return lapNumber; }
-        public void setLapNumber(int lapNumber) { this.lapNumber = lapNumber; }
-
-        public float getLapTime() { return lapTime; }
-        public void setLapTime(float lapTime) { this.lapTime = lapTime; }
-    }
-
-    public static class ChatMessageRequest {
-        private String message;
-
-        public String getMessage() { return message; }
-        public void setMessage(String message) { this.message = message; }
-    }
-
-    public static class PositionBroadcast {
-        private String playerId;
-        private PlayerPosition position;
-        private Instant timestamp;
-
-        // Getters and setters
-        public String getPlayerId() { return playerId; }
-        public void setPlayerId(String playerId) { this.playerId = playerId; }
-
-        public PlayerPosition getPosition() { return position; }
-        public void setPosition(PlayerPosition position) { this.position = position; }
-
-        public Instant getTimestamp() { return timestamp; }
-        public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
-    }
-
-    public static class LapCompleteBroadcast {
+    public static class PlayerConnection {
+        private String connectionId;
         private String playerId;
         private String playerName;
-        private int lapNumber;
-        private float lapTime;
-        private float bestLap;
-        private int position;
+        private String status;
+        private Instant connectedAt;
 
         // Getters and setters
+        public String getConnectionId() { return connectionId; }
+        public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
+
         public String getPlayerId() { return playerId; }
         public void setPlayerId(String playerId) { this.playerId = playerId; }
 
         public String getPlayerName() { return playerName; }
         public void setPlayerName(String playerName) { this.playerName = playerName; }
 
-        public int getLapNumber() { return lapNumber; }
-        public void setLapNumber(int lapNumber) { this.lapNumber = lapNumber; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
 
-        public float getLapTime() { return lapTime; }
-        public void setLapTime(float lapTime) { this.lapTime = lapTime; }
-
-        public float getBestLap() { return bestLap; }
-        public void setBestLap(float bestLap) { this.bestLap = bestLap; }
-
-        public int getPosition() { return position; }
-        public void setPosition(int position) { this.position = position; }
+        public Instant getConnectedAt() { return connectedAt; }
+        public void setConnectedAt(Instant connectedAt) { this.connectedAt = connectedAt; }
     }
 
-    public static class SessionInfo {
-        private String raceId;
+    // Request/Response DTOs
+    public static class JoinLobbyRequest {
+        private String playerId;
+        private String playerName;
+        private String carId;
         private String trackId;
-        private int participantCount;
-        private List<RaceParticipant> participants;
-        private String sessionStatus;
+        private String raceMode;
 
         // Getters and setters
-        public String getRaceId() { return raceId; }
-        public void setRaceId(String raceId) { this.raceId = raceId; }
-
+        public String getPlayerId() { return playerId; }
+        public void setPlayerId(String playerId) { this.playerId = playerId; }
+        public String getPlayerName() { return playerName; }
+        public void setPlayerName(String playerName) { this.playerName = playerName; }
+        public String getCarId() { return carId; }
+        public void setCarId(String carId) { this.carId = carId; }
         public String getTrackId() { return trackId; }
         public void setTrackId(String trackId) { this.trackId = trackId; }
-
-        public int getParticipantCount() { return participantCount; }
-        public void setParticipantCount(int participantCount) { this.participantCount = participantCount; }
-
-        public List<RaceParticipant> getParticipants() { return participants; }
-        public void setParticipants(List<RaceParticipant> participants) { this.participants = participants; }
-
-        public String getSessionStatus() { return sessionStatus; }
-        public void setSessionStatus(String sessionStatus) { this.sessionStatus = sessionStatus; }
+        public String getRaceMode() { return raceMode; }
+        public void setRaceMode(String raceMode) { this.raceMode = raceMode; }
     }
 
-    public static class ChatMessage {
+    public static class CreateRaceRequest {
         private String playerId;
         private String playerName;
-        private String message;
-        private Instant timestamp;
+        private String carId;
+        private String trackId;
+        private String raceMode;
+        private int maxParticipants;
+        private int lapCount;
 
         // Getters and setters
         public String getPlayerId() { return playerId; }
         public void setPlayerId(String playerId) { this.playerId = playerId; }
-
         public String getPlayerName() { return playerName; }
         public void setPlayerName(String playerName) { this.playerName = playerName; }
+        public String getCarId() { return carId; }
+        public void setCarId(String carId) { this.carId = carId; }
+        public String getTrackId() { return trackId; }
+        public void setTrackId(String trackId) { this.trackId = trackId; }
+        public String getRaceMode() { return raceMode; }
+        public void setRaceMode(String raceMode) { this.raceMode = raceMode; }
+        public int getMaxParticipants() { return maxParticipants; }
+        public void setMaxParticipants(int maxParticipants) { this.maxParticipants = maxParticipants; }
+        public int getLapCount() { return lapCount; }
+        public void setLapCount(int lapCount) { this.lapCount = lapCount; }
+    }
 
+    public static class StartRaceRequest {
+        private String sessionId;
+        private String playerId;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public String getPlayerId() { return playerId; }
+        public void setPlayerId(String playerId) { this.playerId = playerId; }
+    }
+
+    public static class FinishRaceRequest {
+        private String sessionId;
+        private String playerId;
+        private int position;
+        private float totalTime;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public String getPlayerId() { return playerId; }
+        public void setPlayerId(String playerId) { this.playerId = playerId; }
+        public int getPosition() { return position; }
+        public void setPosition(int position) { this.position = position; }
+        public float getTotalTime() { return totalTime; }
+        public void setTotalTime(float totalTime) { this.totalTime = totalTime; }
+    }
+
+    public static class LobbyResponse {
+        private String sessionId;
+        private String status;
+        private String trackId;
+        private List<RaceParticipant> participants;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
+        public String getTrackId() { return trackId; }
+        public void setTrackId(String trackId) { this.trackId = trackId; }
+        public List<RaceParticipant> getParticipants() { return participants; }
+        public void setParticipants(List<RaceParticipant> participants) { this.participants = participants; }
+    }
+
+    public static class RaceCreatedResponse {
+        private String sessionId;
+        private String status;
+        private String message;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
         public String getMessage() { return message; }
         public void setMessage(String message) { this.message = message; }
+    }
 
+    public static class RaceUpdateEvent {
+        private String sessionId;
+        private String playerId;
+        private int currentLap;
+        private int position;
+        private float bestLapTime;
+        private float lastLapTime;
+        private float totalRaceTime;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public String getPlayerId() { return playerId; }
+        public void setPlayerId(String playerId) { this.playerId = playerId; }
+        public int getCurrentLap() { return currentLap; }
+        public void setCurrentLap(int currentLap) { this.currentLap = currentLap; }
+        public int getPosition() { return position; }
+        public void setPosition(int position) { this.position = position; }
+        public float getBestLapTime() { return bestLapTime; }
+        public void setBestLapTime(float bestLapTime) { this.bestLapTime = bestLapTime; }
+        public float getLastLapTime() { return lastLapTime; }
+        public void setLastLapTime(float lastLapTime) { this.lastLapTime = lastLapTime; }
+        public float getTotalRaceTime() { return totalRaceTime; }
+        public void setTotalRaceTime(float totalRaceTime) { this.totalRaceTime = totalRaceTime; }
+    }
+
+    public static class RaceStartEvent {
+        private String sessionId;
+        private Instant startTime;
+        private Instant countdownStart;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public Instant getStartTime() { return startTime; }
+        public void setStartTime(Instant startTime) { this.startTime = startTime; }
+        public Instant getCountdownStart() { return countdownStart; }
+        public void setCountdownStart(Instant countdownStart) { this.countdownStart = countdownStart; }
+    }
+
+    public static class RaceResultsEvent {
+        private String sessionId;
+        private List<RaceParticipant> results;
+
+        public String getSessionId() { return sessionId; }
+        public void setSessionId(String sessionId) { this.sessionId = sessionId; }
+        public List<RaceParticipant> getResults() { return results; }
+        public void setResults(List<RaceParticipant> results) { this.results = results; }
+    }
+
+    public static class WebSocketMessage {
+        private String type;
+        private Object data;
+        private Instant timestamp;
+
+        public String getType() { return type; }
+        public void setType(String type) { this.type = type; }
+        public Object getData() { return data; }
+        public void setData(Object data) { this.data = data; }
         public Instant getTimestamp() { return timestamp; }
         public void setTimestamp(Instant timestamp) { this.timestamp = timestamp; }
     }
-
-    public static class RaceResult {
-        private int position;
-        private String playerId;
-        private String playerName;
-        private float bestLapTime;
-        private float totalRaceTime;
-        private int lapsCompleted;
+}

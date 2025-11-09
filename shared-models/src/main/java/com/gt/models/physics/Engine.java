@@ -1,40 +1,3 @@
-        return currentRpm >= shiftUpRpm;
-    }
-
-    /**
-     * Check if engine should automatically shift down
-     */
-    public boolean shouldShiftDown(float currentRpm) {
-        return currentRpm <= shiftDownRpm;
-    }
-
-    /**
-     * Get engine sound pitch multiplier based on RPM
-     */
-    public float getSoundPitch() {
-        return Math.max(0.5f, Math.min(2.0f, rpm / (redlineRpm * 0.5f)));
-    }
-
-    /**
-     * Get engine efficiency at current RPM
-     * @param rpm Current RPM
-     * @return Efficiency (0.0 to 1.0)
-     */
-    public float getEfficiency(float rpm) {
-        // Most efficient around 2000-3000 RPM for most engines
-        float optimalRpm = idleRpm + (redlineRpm - idleRpm) * 0.3f;
-        float rpmDiff = Math.abs(rpm - optimalRpm);
-        float maxDiff = redlineRpm - idleRpm;
-
-        return Math.max(0.2f, 1.0f - (rpmDiff / maxDiff));
-    }
-
-    private float rpm; // Current RPM for sound calculation
-
-    public void setCurrentRpm(float rpm) {
-        this.rpm = rpm;
-    }
-}
 package com.gt.models.physics;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -58,6 +21,7 @@ public class Engine {
     private boolean turboCharged;
     private float boostPressure; // Turbo boost pressure in bar
     private String engineType; // "inline4", "v6", "v8", "v10", "v12", etc.
+    private float rpm; // Current RPM for sound calculation
 
     public Engine() {
         this.maxPower = 300.0f; // 300 HP
@@ -185,6 +149,10 @@ public class Engine {
 
     public void setEngineType(String engineType) {
         this.engineType = engineType;
+    }
+
+    public void setCurrentRpm(float rpm) {
+        this.rpm = rpm;
     }
 
     /**
@@ -378,3 +346,34 @@ public class Engine {
      * Check if engine should automatically shift up
      */
     public boolean shouldShiftUp(float currentRpm) {
+        return currentRpm >= shiftUpRpm;
+    }
+
+    /**
+     * Check if engine should automatically shift down
+     */
+    public boolean shouldShiftDown(float currentRpm) {
+        return currentRpm <= shiftDownRpm;
+    }
+
+    /**
+     * Get engine sound pitch multiplier based on RPM
+     */
+    public float getSoundPitch() {
+        return Math.max(0.5f, Math.min(2.0f, rpm / (redlineRpm * 0.5f)));
+    }
+
+    /**
+     * Get engine efficiency at current RPM
+     * @param rpm Current RPM
+     * @return Efficiency (0.0 to 1.0)
+     */
+    public float getEfficiency(float rpm) {
+        // Most efficient around 2000-3000 RPM for most engines
+        float optimalRpm = idleRpm + (redlineRpm - idleRpm) * 0.3f;
+        float rpmDiff = Math.abs(rpm - optimalRpm);
+        float maxDiff = redlineRpm - idleRpm;
+
+        return Math.max(0.2f, 1.0f - (rpmDiff / maxDiff));
+    }
+}

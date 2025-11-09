@@ -177,8 +177,8 @@ public class LeaderboardHandler implements RequestHandler<APIGatewayProxyRequest
                 .limit(limit)
                 .scanIndexForward(true)
                 .build())
-                .items()
                 .stream()
+                .flatMap(page -> page.items().stream())
                 .collect(Collectors.toList());
 
             List<LeaderboardResponse> response = entries.stream()
@@ -225,8 +225,8 @@ public class LeaderboardHandler implements RequestHandler<APIGatewayProxyRequest
                 .queryConditional(queryConditional)
                 .scanIndexForward(true)
                 .build())
-                .items()
                 .stream()
+                .flatMap(page -> page.items().stream())
                 .collect(Collectors.toList());
 
             // Group by track and get best times
@@ -392,7 +392,7 @@ public class LeaderboardHandler implements RequestHandler<APIGatewayProxyRequest
         response.setCarName(entry.getCarName());
         response.setCarClass(entry.getCarClass());
         response.setTimestamp(entry.getTimestamp());
-        response.setIsRecord(entry.isIsRecord());
+        response.setRecord(entry.isIsRecord());
         return response;
     }
 

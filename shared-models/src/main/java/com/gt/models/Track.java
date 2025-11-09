@@ -487,13 +487,24 @@ public class Track {
     // Utility methods
     public float getDifficultyRating() {
         // Calculate overall difficulty based on various factors
-        float baseRating = switch (difficulty.toLowerCase()) {
-            case "beginner" -> 2.0f;
-            case "intermediate" -> 5.0f;
-            case "advanced" -> 7.0f;
-            case "expert" -> 9.0f;
-            default -> 5.0f;
-        };
+        float baseRating;
+        switch (difficulty.toLowerCase()) {
+            case "beginner":
+                baseRating = 2.0f;
+                break;
+            case "intermediate":
+                baseRating = 5.0f;
+                break;
+            case "advanced":
+                baseRating = 7.0f;
+                break;
+            case "expert":
+                baseRating = 9.0f;
+                break;
+            default:
+                baseRating = 5.0f;
+                break;
+        }
 
         // Modify based on track characteristics
         if (turnCount > 20) baseRating += 1.0f;

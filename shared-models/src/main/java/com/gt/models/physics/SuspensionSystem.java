@@ -423,9 +423,6 @@ public class SuspensionSystem {
     public void setAdaptiveDampers(boolean adaptiveDampers) { this.adaptiveDampers = adaptiveDampers; }
 
     public float getAdaptiveDamperSetting() { return adaptiveDamperSetting; }
-    public void setAdaptiveDamperSetting(float adaptiveDamperSetting) {
-        this.adaptiveDamperSetting = Math.max(0.0f, Math.min(1.0f, adaptiveDamperSetting));
-    }
 
     public float[] getSuspensionPosition() { return suspensionPosition; }
     public float[] getCamberAngles() { return camberAngles; }
