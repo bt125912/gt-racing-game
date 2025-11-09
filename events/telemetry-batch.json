@@ -1,0 +1,10 @@
+{
+  "httpMethod": "POST",
+  "path": "/telemetry/batch",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer sample-jwt-token"
+  },
+  "body": "{\"sessionId\":\"race_1699531800_abc123\",\"telemetryData\":[{\"timestamp\":\"2024-11-09T10:30:00Z\",\"speed\":145.5,\"rpm\":6500,\"redlineRpm\":7000,\"gear\":4,\"throttlePosition\":0.85,\"brakePosition\":0.0,\"steeringAngle\":0.2,\"engineTemperature\":95.0,\"brakeTemperatureFront\":180.0,\"brakeTemperatureRear\":165.0,\"tireTemperatures\":[85.0,87.0,82.0,84.0],\"tireWear\":[0.05,0.06,0.04,0.05],\"tirePressures\":[2.2,2.2,2.0,2.0],\"fuelLevel\":0.87,\"lateralAcceleration\":0.8,\"longitudinalAcceleration\":0.3,\"yawRate\":0.15,\"escActive\":false,\"tcsActive\":false,\"absActive\":false}]}"
+}
+

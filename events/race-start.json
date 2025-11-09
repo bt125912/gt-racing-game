@@ -1,0 +1,10 @@
+{
+  "httpMethod": "POST",
+  "path": "/race/start",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer sample-jwt-token"
+  },
+  "body": "{\"playerId\":\"player123\",\"trackId\":\"suzuka_circuit\",\"carId\":\"GT_R34_001\",\"gameMode\":\"time_trial\",\"weatherConditions\":\"clear\",\"trackCondition\":\"dry\"}"
+}
+

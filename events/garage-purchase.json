@@ -1,0 +1,13 @@
+{
+  "httpMethod": "POST",
+  "path": "/garage/player123/purchase",
+  "headers": {
+    "Content-Type": "application/json",
+    "Authorization": "Bearer sample-jwt-token"
+  },
+  "pathParameters": {
+    "playerId": "player123"
+  },
+  "body": "{\"playerId\":\"player123\",\"carModelId\":\"M3_E46\",\"customName\":\"My M3 Track Beast\",\"bodyColor\":\"Imola Red\"}"
+}
+

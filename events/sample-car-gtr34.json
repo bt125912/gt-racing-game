@@ -1,0 +1,144 @@
+{
+  "carId": "GT_R34_001",
+  "ownerId": "player123",
+  "baseName": "Nissan Skyline GT-R R34",
+  "customName": "My GT-R Beast",
+  "manufacturer": "Nissan",
+  "model": "Skyline GT-R",
+  "year": 1999,
+  "category": "sport",
+  "driveType": "awd",
+
+  "mass": 1560,
+  "wheelbase": 2.67,
+  "trackWidth": 1.53,
+  "centerOfMassHeight": 0.54,
+  "frontWeightDistribution": 0.59,
+
+  "engine": {
+    "displacement": 2.6,
+    "maxPower": 276,
+    "maxTorque": 392,
+    "redlineRpm": 7000,
+    "idleRpm": 800,
+    "fuelType": "gasoline",
+    "aspiration": "turbocharged",
+    "turbochargerMultiplier": 1.3,
+    "temperature": 90,
+    "fuelConsumptionRate": 0.00012,
+    "damageMultiplier": 1.0
+  },
+
+  "transmission": {
+    "type": "manual",
+    "gearCount": 6,
+    "gearRatios": [3.83, 2.36, 1.69, 1.31, 1.00, 0.79],
+    "finalDriveRatio": 4.11,
+    "efficiency": 0.95,
+    "shiftTime": 0.2,
+    "clutchEngagementTime": 0.3
+  },
+
+  "aerodynamics": {
+    "dragCoefficient": 0.34,
+    "downforceCoefficient": 0.15,
+    "frontalArea": 2.1
+  },
+
+  "brakeSystem": {
+    "frontDiscDiameter": 324,
+    "rearDiscDiameter": 322,
+    "frontDiscThickness": 32,
+    "rearDiscThickness": 20,
+    "frontPadArea": 45.0,
+    "rearPadArea": 35.0,
+    "frontPadCompound": "semi_metallic",
+    "rearPadCompound": "semi_metallic",
+    "brakeBias": 0.65,
+    "maxBrakeForce": 12000,
+    "absEnabled": true,
+    "ebdEnabled": true,
+    "ventilatedDiscs": true
+  },
+
+  "suspensionSystem": {
+    "frontSpringRate": 35000,
+    "rearSpringRate": 40000,
+    "frontDamperCompression": 2500,
+    "frontDamperRebound": 3500,
+    "rearDamperCompression": 3000,
+    "rearDamperRebound": 4000,
+    "frontAntiRollBarRate": 15000,
+    "rearAntiRollBarRate": 12000,
+    "frontAntiRollBarEnabled": true,
+    "rearAntiRollBarEnabled": true,
+    "suspensionType": "multi_link",
+    "adaptiveDampers": false,
+    "rideHeight": 120
+  },
+
+  "stabilityControl": {
+    "escEnabled": true,
+    "tcsEnabled": true,
+    "absEnabled": true,
+    "escAggressiveness": 0.7,
+    "tcsAggressiveness": 0.6
+  },
+
+  "wheels": [
+    {
+      "position": "front_left",
+      "radius": 0.33,
+      "width": 0.245,
+      "grip": 1.0,
+      "pressure": 2.2,
+      "temperature": 25,
+      "wear": 0.0,
+      "tireCompound": "sport"
+    },
+    {
+      "position": "front_right",
+      "radius": 0.33,
+      "width": 0.245,
+      "grip": 1.0,
+      "pressure": 2.2,
+      "temperature": 25,
+      "wear": 0.0,
+      "tireCompound": "sport"
+    },
+    {
+      "position": "rear_left",
+      "radius": 0.33,
+      "width": 0.275,
+      "grip": 1.0,
+      "pressure": 2.0,
+      "temperature": 25,
+      "wear": 0.0,
+      "tireCompound": "sport"
+    },
+    {
+      "position": "rear_right",
+      "radius": 0.33,
+      "width": 0.275,
+      "grip": 1.0,
+      "pressure": 2.0,
+      "temperature": 25,
+      "wear": 0.0,
+      "tireCompound": "sport"
+    }
+  ],
+
+  "bodyColor": "Bayside Blue",
+  "rimColor": "Silver",
+  "interiorColor": "Black",
+  "liveryId": "stock",
+
+  "purchasePrice": 85000,
+  "currentValue": 85000,
+  "damageLevel": 0.0,
+  "totalDistance": 0,
+  "raceCount": 0,
+  "fuelLevel": 1.0,
+  "createdAt": "2024-11-09T10:30:00Z"
+}
+

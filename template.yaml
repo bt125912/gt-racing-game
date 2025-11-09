@@ -1,0 +1,535 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  GT Racing Game Backend
+  
+  Complete serverless backend for Gran Turismo style racing game with leaderboards,
+  race sessions, player data, telemetry, garage management, and real-time multiplayer support.
+
+Globals:
+  Function:
+    Timeout: 30
+    Runtime: java11
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        RACE_RESULTS_TABLE: !Ref RaceResultsTable
+        LEADERBOARD_TABLE: !Ref LeaderboardTable
+        PLAYER_DATA_TABLE: !Ref PlayerDataTable
+        TELEMETRY_TABLE: !Ref TelemetryTable
+        GARAGE_DATA_TABLE: !Ref GarageDataTable
+        WEBSOCKET_CONNECTIONS_TABLE: !Ref WebSocketConnectionsTable
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Environment stage
+
+Resources:
+  # API Gateway for REST endpoints
+  GTGameApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowOrigin: "'*'"
+
+  # Race Session Management
+  RaceSessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: RaceSessionFunction
+      Handler: com.gt.race.RaceSessionHandler::handleRequest
+      Environment:
+        Variables:
+          WEBSOCKET_API_URL: !Sub 'wss://${GTGameWebSocket}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RaceResultsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlayerDataTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GTGameWebSocket}/*/*'
+      Events:
+        StartRace:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /race/start
+            Method: post
+        EndRace:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /race/end
+            Method: post
+        GetRaceStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /race/{raceId}/status
+            Method: get
+
+  # Leaderboard Service
+  LeaderboardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: LeaderboardFunction
+      Handler: com.gt.leaderboard.LeaderboardHandler::handleRequest
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref LeaderboardTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RaceResultsTable
+      Events:
+        GetLeaderboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /leaderboard/{category}
+            Method: get
+        GetTrackLeaderboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /leaderboard/track/{trackId}
+            Method: get
+        UpdateLeaderboard:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /leaderboard/update
+            Method: post
+        GetPlayerRanking:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /player/{playerId}/ranking
+            Method: get
+
+  # Player Data Service
+  PlayerDataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: PlayerDataFunction
+      Handler: com.gt.player.PlayerDataHandler::handleRequest
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlayerDataTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref GarageDataTable
+      Events:
+        GetPlayer:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /player/{playerId}
+            Method: get
+        UpdatePlayer:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /player/{playerId}
+            Method: put
+        CreatePlayer:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /player
+            Method: post
+        GetPlayerStats:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /player/{playerId}/stats
+            Method: get
+
+  # Garage Management Service
+  GarageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GarageFunction
+      Handler: com.gt.garage.GarageHandler::handleRequest
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GarageDataTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PlayerDataTable
+      Events:
+        GetPlayerCars:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/cars
+            Method: get
+        GetCarDetails:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/car/{carId}
+            Method: get
+        GetDealership:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/dealership
+            Method: get
+        PurchaseCar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/purchase
+            Method: post
+        TuneCar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/tune
+            Method: post
+        SellCar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/sell
+            Method: post
+        UpdateCar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/car/{carId}
+            Method: put
+        DeleteCar:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /garage/{playerId}/car/{carId}
+            Method: delete
+
+  # Telemetry Processing
+  TelemetryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: TelemetryFunction
+      Handler: com.gt.telemetry.TelemetryHandler::handleRequest
+      Timeout: 60
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TelemetryTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RaceResultsTable
+      Events:
+        ProcessBatchTelemetry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /telemetry/batch
+            Method: post
+        ProcessRealtimeTelemetry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /telemetry/realtime
+            Method: post
+        GetSessionTelemetry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /telemetry/session/{sessionId}
+            Method: get
+        GetTelemetryAnalysis:
+          Type: Api
+          Properties:
+            RestApiId: !Ref GTGameApi
+            Path: /telemetry/analysis/{sessionId}
+            Method: get
+
+  # Real-time Multiplayer WebSocket Handler
+  MultiplayerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: MultiplayerFunction
+      Handler: com.gt.multiplayer.MultiplayerHandler::handleRequest
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+        - Statement:
+            Effect: Allow
+            Action:
+              - 'execute-api:ManageConnections'
+            Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${GTGameWebSocket}/*/*'
+
+  # Real-time Multiplayer WebSocket API
+  GTGameWebSocket:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: GT-Game-WebSocket
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref ConnectInteg
+
+  ConnectInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      Description: Connect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MultiplayerFunction.Arn}/invocations'
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DisconnectInteg
+
+  DisconnectInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      Description: Disconnect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MultiplayerFunction.Arn}/invocations'
+
+  JoinRaceRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      RouteKey: joinRace
+      AuthorizationType: NONE
+      OperationName: JoinRaceRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref JoinRaceInteg
+
+  JoinRaceInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      Description: Join Race Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MultiplayerFunction.Arn}/invocations'
+
+  UpdatePositionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      RouteKey: updatePosition
+      AuthorizationType: NONE
+      OperationName: UpdatePositionRoute
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref UpdatePositionInteg
+
+  UpdatePositionInteg:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+      Description: Update Position Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MultiplayerFunction.Arn}/invocations'
+
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - ConnectRoute
+      - DisconnectRoute
+      - JoinRaceRoute
+      - UpdatePositionRoute
+    Properties:
+      ApiId: !Ref GTGameWebSocket
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: !Ref Stage
+      Description: !Sub '${Stage} Stage'
+      DeploymentId: !Ref Deployment
+      ApiId: !Ref GTGameWebSocket
+
+  # Lambda Permissions for WebSocket
+  ConnectLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - GTGameWebSocket
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref MultiplayerFunction
+      Principal: apigateway.amazonaws.com
+
+  # DynamoDB Tables
+  RaceResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-RaceResults-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: raceId
+          AttributeType: S
+        - AttributeName: playerId
+          AttributeType: S
+        - AttributeName: lapTime
+          AttributeType: N
+      KeySchema:
+        - AttributeName: raceId
+          KeyType: HASH
+        - AttributeName: playerId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: PlayerRaceIndex
+          KeySchema:
+            - AttributeName: playerId
+              KeyType: HASH
+            - AttributeName: lapTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  LeaderboardTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-Leaderboard-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: trackId
+          AttributeType: S
+        - AttributeName: lapTime
+          AttributeType: N
+        - AttributeName: category
+          AttributeType: S
+      KeySchema:
+        - AttributeName: trackId
+          KeyType: HASH
+        - AttributeName: lapTime
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: CategoryIndex
+          KeySchema:
+            - AttributeName: category
+              KeyType: HASH
+            - AttributeName: lapTime
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  PlayerDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-PlayerData-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: playerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: playerId
+          KeyType: HASH
+
+  TelemetryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-Telemetry-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: sessionId
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: N
+      KeySchema:
+        - AttributeName: sessionId
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  GarageDataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-GarageData-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: carId
+          AttributeType: S
+        - AttributeName: ownerId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: carId
+          KeyType: HASH
+        - AttributeName: ownerId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OwnerIndex
+          KeySchema:
+            - AttributeName: ownerId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  WebSocketConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'GT-WebSocket-Connections-${Stage}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+Outputs:
+  GTGameApiEndpoint:
+    Description: "API Gateway endpoint URL for GT Racing Game backend"
+    Value: !Sub "https://${GTGameApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  WebSocketURI:
+    Description: "WebSocket URI for real-time multiplayer"
+    Value: !Sub "wss://${GTGameWebSocket}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+    Export:
+      Name: !Sub "${AWS::StackName}-WebSocketURI"
+
+  RaceResultsTableName:
+    Description: "DynamoDB table name for race results"
+    Value: !Ref RaceResultsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-RaceResultsTable"
+
+  GarageDataTableName:
+    Description: "DynamoDB table name for garage data"
+    Value: !Ref GarageDataTable
+    Export:
+      Name: !Sub "${AWS::StackName}-GarageDataTable"
